@@ -12,7 +12,6 @@ app.use('/api/navlinks', navlinksRouter);
 app.use('/api/products', prodlinksRouter);
 app.use('/api/categories', categoriesRouter);
 
-
 if (require.main === module) {
   const PORT = process.env.PORT || 3000;
   app.listen(PORT, () => {
