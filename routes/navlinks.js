@@ -17,12 +17,18 @@ router.get('/', async (_req, res) => {
       SELECT id, parent_id, label, slug, display_order
       FROM   "NavLinks"
       WHERE  published
+      ORDER  BY parent_id NULLS FIRST, display_order
     `);
 
     /* ---------- pass 1: create every node ---------- */
-    const map  = new Map();              // id → node
+    const map = new Map();  // id → node
     rows.forEach(r => {
-      map.set(r.id, { title: r.label, path: r.slug });
+      const node = {
+        title: r.label,
+        // If it's a leaf node, strip the parent path and keep only the leaf name.
+        path: r.parent_id ? r.slug.split('/').pop() : r.slug
+      };
+      map.set(r.id, node);
     });
 
     /* ---------- pass 2: wire up hierarchy ---------- */
@@ -35,12 +41,9 @@ router.get('/', async (_req, res) => {
           (parent.submenu ??= []).push(node);
         }
       } else {
-        menu.push(node);                 // root
+        menu.push(node);  // root
       }
     });
-
-    /* optional: sort each submenu by display_order already present in rows */
-    // (skip if you don’t need strict ordering inside JS)
 
     res.setHeader('Cache-Control', 'public, max-age=3600');
     res.json(menu);
@@ -49,6 +52,10 @@ router.get('/', async (_req, res) => {
     res.status(500).json({ error: 'DB query failed' });
   }
 });
+
+
+
+
 
 /* =========================================================
    POST /api/navlinks
