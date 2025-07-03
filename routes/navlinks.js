@@ -1,32 +1,46 @@
+/* routes/navlinks.js
+   --------------------------------------------------------- */
 const express = require('express');
 const pool    = require('../db');
 
 const router = express.Router();
 
-/* ----------  GET /api/navlinks  ---------- */
+/* ───────── helpers ───────── */
+const ensureLeadingSlash = (p) => (p.startsWith('/') ? p : '/' + p);
+
+/* =========================================================
+   GET  /api/navlinks
+   ========================================================= */
 router.get('/', async (_req, res) => {
   try {
     const { rows } = await pool.query(`
       SELECT id, parent_id, label, slug, display_order
       FROM   "NavLinks"
       WHERE  published
-      ORDER  BY parent_id NULLS FIRST, display_order
     `);
 
-    // build unlimited-depth tree
-    const map = new Map();
-    const menu = [];
-
+    /* ---------- pass 1: create every node ---------- */
+    const map  = new Map();              // id → node
     rows.forEach(r => {
-      const node = { title: r.label, path: r.slug };
-      map.set(r.id, node);
+      map.set(r.id, { title: r.label, path: r.slug });
+    });
 
+    /* ---------- pass 2: wire up hierarchy ---------- */
+    const menu = [];
+    rows.forEach(r => {
+      const node = map.get(r.id);
       if (r.parent_id) {
-        (map.get(r.parent_id).submenu ??= []).push(node);
+        const parent = map.get(r.parent_id);
+        if (parent) {
+          (parent.submenu ??= []).push(node);
+        }
       } else {
-        menu.push(node);
+        menu.push(node);                 // root
       }
     });
+
+    /* optional: sort each submenu by display_order already present in rows */
+    // (skip if you don’t need strict ordering inside JS)
 
     res.setHeader('Cache-Control', 'public, max-age=3600');
     res.json(menu);
@@ -36,34 +50,49 @@ router.get('/', async (_req, res) => {
   }
 });
 
-/* ----------  POST /api/navlinks  ---------- */
+/* =========================================================
+   POST /api/navlinks
+   ========================================================= */
 router.post('/', async (req, res) => {
   const root = req.body;
-  if (!root?.title || !root?.path || !root?.order)
-    return res.status(400).json({ error: 'title, path, order are required' });
+  if (!root?.title || !root?.path)
+    return res.status(400).json({ error: 'title and path are required' });
 
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
 
+    /* ----- insert parent ----- */
     const { rows } = await client.query(
       `INSERT INTO "NavLinks" (label, slug, display_order)
        VALUES ($1,$2,$3) RETURNING id`,
-      [root.title, root.path, root.order]
+      [
+        root.title,
+        ensureLeadingSlash(root.path),
+        root.order ?? 1
+      ]
     );
     const rootId = rows[0].id;
 
+    /* ----- recursive children ----- */
     const addKids = async (items, parentId) => {
       for (const it of items ?? []) {
-        if (!it.title || !it.path || !it.order)
-          throw new Error('submenu items need title, path, order');
+        if (!it.title || !it.path)
+          throw new Error('submenu items need title and path');
 
         const { rows: r2 } = await client.query(
           `INSERT INTO "NavLinks" (label, slug, display_order, parent_id)
            VALUES ($1,$2,$3,$4) RETURNING id`,
-          [it.title, it.path, it.order, parentId]
+          [
+            it.title,
+            ensureLeadingSlash(it.path),
+            it.order ?? 1,
+            parentId
+          ]
         );
-        if (it.submenu?.length) await addKids(it.submenu, r2[0].id);
+        if (Array.isArray(it.submenu) && it.submenu.length) {
+          await addKids(it.submenu, r2[0].id);
+        }
       }
     };
     await addKids(root.submenu, rootId);
@@ -78,7 +107,5 @@ router.post('/', async (req, res) => {
     client.release();
   }
 });
-
-
 
 module.exports = router;
