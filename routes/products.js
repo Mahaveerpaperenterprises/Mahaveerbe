@@ -32,63 +32,64 @@ router.post('/', async (req, res) => {
   }
 });
 
+/* ----------  GET /api/products  ---------- */
 router.get('/', async (req, res) => {
-  const { category, page = 1, limit = 20, brand } = req.query;
+  let { category = 'all', page = 1, limit = 20, brand } = req.query;
 
-  if (!category) {
+  const wantAll = String(category).toLowerCase() === 'all';
+  if (!wantAll && !category) {
     return res.status(400).json({ error: 'category query parameter is required' });
   }
 
-  // ensure integers
-  const pageNum  = Math.max(1, parseInt(page,  10) || 1);
-  const perPage  = Math.max(1, parseInt(limit, 10) || 20);
-  const offset   = (pageNum - 1) * perPage;
+  const pageNum = Math.max(1, parseInt(page, 10)  || 1);
+  const perPage = Math.max(1, parseInt(limit, 10) || 20);
+  const offset  = (pageNum - 1) * perPage;
 
   try {
-    /* ---------- build dynamic SQL parts ---------- */
-    const params   = [category, perPage, offset];      // $1, $2, $3
-    let   brandSql = '';
+    /* ---------- dynamic SQL ---------- */
+    const params = [];                // we'll push values in order
+    let   where  = 'WHERE published';
 
     if (brand) {
-      params.unshift(brand);                           // becomes $1
-      brandSql = ' AND brand = $1 ';
+      params.push(brand);             // $1
+      where += ` AND brand = $${params.length}`;
+    }
+    if (!wantAll) {
+      params.push(category);          // next param
+      where += ` AND category_slug = $${params.length}`;
     }
 
     /* ---------- main query ---------- */
+    params.push(perPage, offset);     // last two for LIMIT/OFFSET
     const products = await pool.query(
       `SELECT id, name, model_name, brand, price, images
          FROM "Products"
-        WHERE published
-          ${brandSql}
-          AND category_slug = $${brand ? 2 : 1}
+        ${where}
         ORDER BY created_at DESC
-        LIMIT  $${brand ? 3 : 2}
-        OFFSET $${brand ? 4 : 3}`,
+        LIMIT  $${params.length - 1}
+        OFFSET $${params.length}`,
       params
     );
 
-    /* ---------- total count for pagination ---------- */
-    const countRes = await pool.query(
-      `SELECT COUNT(*) AS total
-         FROM "Products"
-        WHERE published
-          ${brandSql}
-          AND category_slug = $${brand ? 2 : 1}`,
-      brand ? [brand, category] : [category]
+    /* ---------- total count ---------- */
+    const countParams = params.slice(0, params.length - 2); // without limit/offset
+    const { rows: [{ total }] } = await pool.query(
+      `SELECT COUNT(*) AS total FROM "Products" ${where}`,
+      countParams
     );
-    const total = parseInt(countRes.rows[0].total, 10);
 
-    res.setHeader('Cache-Control', 'public, max-age=300'); // 5 min
+    res.setHeader('Cache-Control', 'public, max-age=300');
     res.json({
-      page   : pageNum,
-      limit  : perPage,
-      total,
-      items  : products.rows
+      page  : pageNum,
+      limit : perPage,
+      total : Number(total),
+      items : products.rows
     });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'DB query failed' });
   }
 });
+
 
 module.exports = router;
