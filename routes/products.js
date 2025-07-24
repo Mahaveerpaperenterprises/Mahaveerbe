@@ -2,19 +2,21 @@ const express = require('express');
 const pool = require('../db');
 const router = express.Router();
 
+// POST /api/products - Add a new product
 router.post('/', async (req, res) => {
   const p = req.body;
 
+  // Validate required fields
   if (
     !p.name ||
-    !p.category_slug ||
     !p.brand ||
+    !p.category_slug ||
     !p.description ||
     !Array.isArray(p.images) ||
     p.images.length === 0
   ) {
     return res.status(400).json({
-      error: 'Missing required fields: name, brand, category_slug, description, or image'
+      error: 'Missing required fields: name, brand, category_slug, description, or at least one image'
     });
   }
 
@@ -27,37 +29,37 @@ router.post('/', async (req, res) => {
       [
         p.name,
         p.model_name || null,
-        p.brand || null,
-        p.category_slug || null,
-        p.price || null,
-        p.discountedPrice || null,
-        p.description || null,
-        JSON.stringify(p.images || [])
+        p.brand,
+        p.category_slug,
+        p.price ? parseFloat(p.price) : null,
+        p.discountedPrice ? parseFloat(p.discountedPrice) : null,
+        p.description,
+        JSON.stringify(p.images)
       ]
     );
 
-    res.status(201).json({ message: 'Product saved', id: rows[0].id });
+    return res.status(201).json({
+      message: 'Product saved',
+      id: rows[0].id
+    });
   } catch (e) {
-    console.error(e);
-    res.status(500).json({ error: 'Insert failed' });
+    console.error('DB Insert Error:', e);
+    return res.status(500).json({ error: 'Failed to save product to database' });
   }
 });
 
+// GET /api/products - Get products list with filters
 router.get('/', async (req, res) => {
   let { category = 'all', page = 1, limit = 20, brand } = req.query;
 
   const wantAll = String(category).toLowerCase() === 'all';
-  if (!wantAll && !category) {
-    return res.status(400).json({ error: 'category query parameter is required' });
-  }
-
   const pageNum = Math.max(1, parseInt(page, 10) || 1);
   const perPage = Math.max(1, parseInt(limit, 10) || 20);
   const offset = (pageNum - 1) * perPage;
 
   try {
     const params = [];
-    let where = 'WHERE published';
+    let where = 'WHERE published = true';
 
     if (brand) {
       params.push(brand);
@@ -69,33 +71,40 @@ router.get('/', async (req, res) => {
       where += ` AND category_slug = $${params.length}`;
     }
 
+    // Pagination parameters
     params.push(perPage, offset);
-    const products = await pool.query(
-      `SELECT id, name, model_name, brand, price, images
-         FROM "Products"
-         ${where}
-         ORDER BY created_at DESC
-         LIMIT $${params.length - 1}
-         OFFSET $${params.length}`,
-      params
-    );
+
+    const productsQuery = `
+      SELECT id, name, model_name, brand, category_slug, price, discountedPrice, description, images
+      FROM "Products"
+      ${where}
+      ORDER BY created_at DESC
+      LIMIT $${params.length - 1}
+      OFFSET $${params.length}
+    `;
+
+    const products = await pool.query(productsQuery, params);
 
     const countParams = params.slice(0, params.length - 2);
-    const { rows: [{ total }] } = await pool.query(
-      `SELECT COUNT(*) AS total FROM "Products" ${where}`,
-      countParams
-    );
+    const countQuery = `
+      SELECT COUNT(*) AS total
+      FROM "Products"
+      ${where}
+    `;
+
+    const countResult = await pool.query(countQuery, countParams);
+    const total = Number(countResult.rows[0].total);
 
     res.setHeader('Cache-Control', 'public, max-age=300');
-    res.json({
+    return res.json({
       page: pageNum,
       limit: perPage,
-      total: Number(total),
+      total,
       items: products.rows
     });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'DB query failed' });
+    console.error('DB Fetch Error:', err);
+    return res.status(500).json({ error: 'Failed to fetch products from database' });
   }
 });
 

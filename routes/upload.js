@@ -10,7 +10,7 @@ if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir);
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, uploadDir),
   filename: (req, file, cb) => {
-    const uniqueName = Date.now() + '-' + file.originalname;
+    const uniqueName = Date.now() + '-' + file.originalname.replace(/\s+/g, '_');
     cb(null, uniqueName);
   },
 });
@@ -22,7 +22,8 @@ router.post('/', upload.single('file'), (req, res) => {
     return res.status(400).json({ error: 'No file uploaded' });
   }
 
-  const fileUrl = `http://localhost:5000/uploads/${req.file.filename}`;
+  const baseUrl = `${req.protocol}://${req.get('host')}`;
+  const fileUrl = `${baseUrl}/uploads/${req.file.filename}`;
   res.status(200).json({ url: fileUrl });
 });
 
