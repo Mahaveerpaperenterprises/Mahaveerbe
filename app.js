@@ -22,5 +22,5 @@ if (require.main === module) {
     console.log(`🟢 Server running locally → http://localhost:${PORT}`);
   });
 }
-// ✅ Export the app (Vercel will use this)
+
 module.exports = app;
