@@ -1,54 +1,74 @@
 const express = require('express');
 const pool = require('../db');
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs');
+
 const router = express.Router();
+const uploadDir = path.join(__dirname, '..', 'uploads');
+if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir);
 
-// POST /api/products - Add a new product
-router.post('/', async (req, res) => {
-  const p = req.body;
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, uploadDir),
+  filename: (req, file, cb) => {
+    const uniqueName = Date.now() + '-' + file.originalname.replace(/\s+/g, '_');
+    cb(null, uniqueName);
+  },
+});
 
-  // Validate required fields
-  if (
-    !p.name ||
-    !p.brand ||
-    !p.category_slug ||
-    !p.description ||
-    !Array.isArray(p.images) ||
-    p.images.length === 0
-  ) {
-    return res.status(400).json({
-      error: 'Missing required fields: name, brand, category_slug, description, or at least one image'
-    });
-  }
+const upload = multer({ storage });
 
+router.post('/', upload.array('images'), async (req, res) => {
   try {
+    const body = req.body;
+    const files = req.files || [];
+
+    const urlImages = body.imageUrls
+      ? body.imageUrls.split(',').map((s) => s.trim()).filter(Boolean)
+      : [];
+
+    const fileUrls = files.map(
+      (file) => `${req.protocol}://${req.get('host')}/uploads/${file.filename}`
+    );
+
+    const allImages = [...urlImages, ...fileUrls];
+
+    if (
+      !body.name ||
+      !body.brand ||
+      !body.category_slug ||
+      !body.description ||
+      allImages.length === 0
+    ) {
+      return res.status(400).json({
+        error: 'Missing required fields: name, brand, category_slug, description, or at least one image',
+      });
+    }
+
     const { rows } = await pool.query(
       `INSERT INTO "Products"
          (name, model_name, brand, category_slug, price, discountedPrice, description, images)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
        RETURNING id`,
       [
-        p.name,
-        p.model_name || null,
-        p.brand,
-        p.category_slug,
-        p.price ? parseFloat(p.price) : null,
-        p.discountedPrice ? parseFloat(p.discountedPrice) : null,
-        p.description,
-        JSON.stringify(p.images)
+        body.name,
+        body.model_name || null,
+        body.brand,
+        body.category_slug,
+        body.price ? parseFloat(body.price) : null,
+        body.discountedPrice ? parseFloat(body.discountedPrice) : null,
+        body.description,
+        JSON.stringify(allImages),
       ]
     );
 
-    return res.status(201).json({
-      message: 'Product saved',
-      id: rows[0].id
-    });
-  } catch (e) {
-    console.error('DB Insert Error:', e);
-    return res.status(500).json({ error: 'Failed to save product to database' });
+    return res.status(201).json({ message: 'Product saved', id: rows[0].id });
+  } catch (err) {
+    console.error('Error inserting product:', err);
+    return res.status(500).json({ error: 'Failed to save product' });
   }
 });
 
-// GET /api/products - Get products list with filters
 router.get('/', async (req, res) => {
   let { category = 'all', page = 1, limit = 20, brand } = req.query;
 
@@ -71,7 +91,6 @@ router.get('/', async (req, res) => {
       where += ` AND category_slug = $${params.length}`;
     }
 
-    // Pagination parameters
     params.push(perPage, offset);
 
     const productsQuery = `
@@ -100,7 +119,7 @@ router.get('/', async (req, res) => {
       page: pageNum,
       limit: perPage,
       total,
-      items: products.rows
+      items: products.rows,
     });
   } catch (err) {
     console.error('DB Fetch Error:', err);
