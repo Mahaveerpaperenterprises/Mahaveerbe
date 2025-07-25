@@ -8,7 +8,13 @@ const authRouter = require('./routes/auth');
 const uploadRoute = require('./routes/upload');
 
 const app = express();
-app.use(cors());
+
+const corsOptions = {
+  origin: ['http://localhost:3000', 'http://192.168.0.106:3000'],
+  credentials: true,
+};
+
+app.use(cors(corsOptions));
 app.use(express.json());
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
