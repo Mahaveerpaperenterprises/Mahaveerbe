@@ -33,16 +33,16 @@ router.post('/signup', async (req, res) => {
 
 /* for login users */
 router.post('/login', async (req, res) => {
-  const { email, password, userType } = req.body;
+  const { b2cEmail, b2cPassword, userType } = req.body;
 
-  if (!email || !password || !userType) {
+  if (!b2cEmail || !b2cPassword || !userType) {
     return res.status(400).json({ error: 'All fields are required' });
   }
 
   try {
     const result = await pool.query(
       `SELECT * FROM "Users" WHERE email = $1 AND user_type = $2`,
-      [email, userType]
+      [b2cEmail, userType]
     );
 
     const user = result.rows[0];
@@ -50,7 +50,7 @@ router.post('/login', async (req, res) => {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
-    const isMatch = await bcrypt.compare(password, user.password);
+    const isMatch = await bcrypt.compare(b2cPassword, user.password);
     if (!isMatch) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
@@ -61,5 +61,6 @@ router.post('/login', async (req, res) => {
     res.status(500).json({ error: 'Login failed' });
   }
 });
+
 
 module.exports = router;
