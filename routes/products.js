@@ -10,12 +10,8 @@ if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir);
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, uploadDir),
-  filename: (req, file, cb) => {
-    const uniqueName = Date.now() + '-' + file.originalname.replace(/\s+/g, '_');
-    cb(null, uniqueName);
-  },
+  filename: (req, file, cb) => cb(null, Date.now() + '-' + file.originalname.replace(/\s+/g, '_')),
 });
-
 const upload = multer({ storage });
 
 router.post('/', upload.array('images'), async (req, res) => {
@@ -23,15 +19,20 @@ router.post('/', upload.array('images'), async (req, res) => {
     const body = req.body;
     const files = req.files || [];
 
-    const urlImages = body.imageUrls
-      ? body.imageUrls.split(',').map((s) => s.trim()).filter(Boolean)
-      : [];
+    const fileUrls = files.map(f => `${req.protocol}://${req.get('host')}/uploads/${f.filename}`);
 
-    const fileUrls = files.map(
-      (file) => `${req.protocol}://${req.get('host')}/uploads/${file.filename}`
-    );
+    let urlImages = [];
+    if (Array.isArray(body.imageUrls)) {
+      urlImages = body.imageUrls.filter(Boolean);
+    } else if (typeof body.imageUrls === 'string') {
+      urlImages = body.imageUrls.trim().startsWith('data:')
+        ? [body.imageUrls.trim()]
+        : body.imageUrls.split(',').map(s => s.trim()).filter(Boolean);
+    }
 
-    const allImages = [...urlImages, ...fileUrls];
+    const inlineImages = Array.isArray(body.images) ? body.images.filter(Boolean) : [];
+
+    const allImages = [...urlImages, ...inlineImages, ...fileUrls];
 
     if (
       !body.name ||

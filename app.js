@@ -16,7 +16,7 @@ const app = express();
 
 // Allow listed origins for local development
 const corsOptions = {
-  origin: ['http://localhost:3000', 'http://192.168.0.106:3000'],
+  origin: ['http://localhost:3000', 'http://192.168.0.106:3000', 'http://localhost:3001',],
   credentials: true,
 };
 
