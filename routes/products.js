@@ -5,21 +5,38 @@ const path = require('path');
 const fs = require('fs');
 
 const router = express.Router();
-const uploadDir = path.join(__dirname, '..', 'uploads');
-if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir);
 
+/* Use /tmp on Vercel (read/write), local "uploads" otherwise */
+const isVercel = !!process.env.VERCEL;
+const uploadDir = isVercel
+  ? path.join('/tmp', 'uploads')
+  : path.join(__dirname, '..', 'uploads');
+
+try {
+  if (!fs.existsSync(uploadDir)) {
+    fs.mkdirSync(uploadDir, { recursive: true });
+  }
+} catch (e) {
+  console.error('Failed to ensure upload dir:', uploadDir, e);
+}
+
+/* Multer storage */
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, uploadDir),
-  filename: (req, file, cb) => cb(null, Date.now() + '-' + file.originalname.replace(/\s+/g, '_')),
+  filename: (req, file, cb) =>
+    cb(null, Date.now() + '-' + file.originalname.replace(/\s+/g, '_')),
 });
 const upload = multer({ storage });
 
+/* ---------- CREATE PRODUCT (supports files + URLs + inline) ---------- */
 router.post('/', upload.array('images'), async (req, res) => {
   try {
     const body = req.body;
     const files = req.files || [];
 
-    const fileUrls = files.map(f => `${req.protocol}://${req.get('host')}/uploads/${f.filename}`);
+    const fileUrls = files.map(
+      (f) => `${req.protocol}://${req.get('host')}/uploads/${f.filename}`
+    );
 
     let urlImages = [];
     if (Array.isArray(body.imageUrls)) {
@@ -27,10 +44,12 @@ router.post('/', upload.array('images'), async (req, res) => {
     } else if (typeof body.imageUrls === 'string') {
       urlImages = body.imageUrls.trim().startsWith('data:')
         ? [body.imageUrls.trim()]
-        : body.imageUrls.split(',').map(s => s.trim()).filter(Boolean);
+        : body.imageUrls.split(',').map((s) => s.trim()).filter(Boolean);
     }
 
-    const inlineImages = Array.isArray(body.images) ? body.images.filter(Boolean) : [];
+    const inlineImages = Array.isArray(body.images)
+      ? body.images.filter(Boolean)
+      : [];
 
     const allImages = [...urlImages, ...inlineImages, ...fileUrls];
 
@@ -42,7 +61,8 @@ router.post('/', upload.array('images'), async (req, res) => {
       allImages.length === 0
     ) {
       return res.status(400).json({
-        error: 'Missing required fields: name, brand, category_slug, description, or at least one image',
+        error:
+          'Missing required fields: name, brand, category_slug, description, or at least one image',
       });
     }
 
@@ -70,6 +90,7 @@ router.post('/', upload.array('images'), async (req, res) => {
   }
 });
 
+/* ---------- LIST PRODUCTS ---------- */
 router.get('/', async (req, res) => {
   let { category = 'all', page = 1, limit = 20, brand } = req.query;
 
@@ -128,4 +149,4 @@ router.get('/', async (req, res) => {
   }
 });
 
-module.exports = router;
+mo
