@@ -11,6 +11,7 @@ const categoriesRouter = require('./routes/categories');
 const authRouter = require('./routes/auth');
 const uploadRoute = require('./routes/upload');
 const ordersRouter = require('./routes/orders');
+const checkoutRouter = require('./routes/checkout');
 
 const app = express();
 
@@ -31,6 +32,8 @@ app.use('/api/categories', categoriesRouter);
 app.use('/api/auth', authRouter);
 app.use('/api/upload', uploadRoute);
 app.use('/api/orders', ordersRouter);
+app.use('/api/checkout', checkoutRouter);
+
 
 // Start server
 const PORT = process.env.PORT || 5000;
