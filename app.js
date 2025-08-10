@@ -17,13 +17,20 @@ const app = express();
 
 // Allow listed origins for local development
 const corsOptions = {
-  origin: ['http://localhost:3000', 'http://192.168.0.106:3000', 'http://localhost:3001',],
+  origin: ['http://localhost:3000', 'http://192.168.0.106:3000', 'http://localhost:3001'],
   credentials: true,
 };
 
 app.use(cors(corsOptions));
 app.use(express.json());
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
+// Serve uploads from /tmp on Vercel or local uploads folder
+const isVercel = !!process.env.VERCEL;
+const uploadsPath = isVercel
+  ? path.join('/tmp', 'uploads')
+  : path.join(__dirname, 'uploads');
+
+app.use('/uploads', express.static(uploadsPath));
 
 // Routes
 app.use('/api/navlinks', navlinksRouter);
@@ -33,7 +40,6 @@ app.use('/api/auth', authRouter);
 app.use('/api/upload', uploadRoute);
 app.use('/api/orders', ordersRouter);
 app.use('/api/checkout', checkoutRouter);
-
 
 // Start server
 const PORT = process.env.PORT || 5000;

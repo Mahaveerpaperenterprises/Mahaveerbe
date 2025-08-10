@@ -4,8 +4,19 @@ const path = require('path');
 const fs = require('fs');
 
 const router = express.Router();
-const uploadDir = path.join(__dirname, '..', 'uploads');
-if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir);
+
+const isVercel = !!process.env.VERCEL;
+const uploadDir = isVercel
+  ? path.join('/tmp', 'uploads')
+  : path.join(__dirname, '..', 'uploads');
+
+try {
+  if (!fs.existsSync(uploadDir)) {
+    fs.mkdirSync(uploadDir, { recursive: true });
+  }
+} catch (e) {
+  console.error('Failed to ensure upload dir:', uploadDir, e);
+}
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, uploadDir),
@@ -24,6 +35,7 @@ router.post('/', upload.single('file'), (req, res) => {
 
   const baseUrl = `${req.protocol}://${req.get('host')}`;
   const fileUrl = `${baseUrl}/uploads/${req.file.filename}`;
+
   res.status(200).json({ url: fileUrl });
 });
 
