@@ -1,43 +1,66 @@
-require('dotenv').config(); // Load env variables from .env for local development or Vercel deployment
+require('dotenv').config();
 
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
+const fs = require('fs');
 
 const app = express();
 
-// Route imports
-const navlinksRouter = require('./routes/navlinks');
-const prodlinksRouter = require('./routes/products');
-const categoriesRouter = require('./routes/categories');
-const authRouter = require('./routes/auth');
-const uploadRoute = require('./routes/upload');
-const ordersRouter = require('./routes/orders');
-const checkoutRouter = require('./routes/checkout');
+app.set('trust proxy', 1);
 
-// Allow listed origins for local development
+const allowlist = new Set([
+  'http://localhost:3000',
+  'http://192.168.0.106:3000',
+  'http://localhost:3001',
+  'https://mahaveerbe.vercel.app',            
+  'https://mahaveerpaperenterprises-sand.vercel.app',
+]);
+
 const corsOptions = {
-  origin: [
-    'http://localhost:3000',
-    'http://192.168.0.106:3000',
-    'http://localhost:3001',
-    'https://mahaveerpaperenterprises-sand.vercel.app',
-  ],
+  origin(origin, cb) {
+    if (!origin) return cb(null, true);
+t
+    const isAllowed =
+      allowlist.has(origin) ||
+      /\.vercel\.app$/i.test(origin);
+
+    return cb(isAllowed ? null : new Error('Not allowed by CORS'), isAllowed);
+  },
   credentials: true,
 };
-
 app.use(cors(corsOptions));
+
 app.use(express.json());
 
-// Serve uploads from /tmp on Vercel or local uploads folder
 const isVercel = !!process.env.VERCEL;
 const uploadsPath = isVercel
   ? path.join('/tmp', 'uploads')
   : path.join(__dirname, 'uploads');
 
-app.use('/uploads', express.static(uploadsPath));
+try {
+  if (!fs.existsSync(uploadsPath)) {
+    fs.mkdirSync(uploadsPath, { recursive: true });
+  }
+} catch (e) {
+  console.error('Failed to ensure uploads dir:', uploadsPath, e);
+}
 
-// Routes
+const setStaticHeaders = (res, filePath) => {
+  res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+};
+
+app.use('/uploads', express.static(uploadsPath, { setHeaders: setStaticHeaders }));
+
+// ---- Routes ----
+const navlinksRouter = require('./routes/navlinks');
+const prodlinksRouter = require('./routes/products');
+const categoriesRouter = require('./routes/categories');
+const authRouter = require('./routes/auth');
+const uploadRoute = require('./routes/upload');    
+const ordersRouter = require('./routes/orders');
+const checkoutRouter = require('./routes/checkout');
+
 app.use('/api/navlinks', navlinksRouter);
 app.use('/api/products', prodlinksRouter);
 app.use('/api/categories', categoriesRouter);
@@ -46,10 +69,8 @@ app.use('/api/upload', uploadRoute);
 app.use('/api/orders', ordersRouter);
 app.use('/api/checkout', checkoutRouter);
 
-// Health check route
 app.get('/', (_req, res) => res.send('API is running'));
 
-// Start server
 const PORT = process.env.PORT || 5000;
 if (require.main === module) {
   app.listen(PORT, () => {
