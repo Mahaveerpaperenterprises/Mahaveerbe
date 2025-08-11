@@ -149,4 +149,5 @@ router.get('/', async (req, res) => {
   }
 });
 
-mo
+
+module.exports = router;

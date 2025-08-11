@@ -1,8 +1,10 @@
-require('dotenv').config(); // Load env variables from .env for local development or vercel deployment
+require('dotenv').config(); // Load env variables from .env for local development or Vercel deployment
 
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
+
+const app = express();
 
 // Route imports
 const navlinksRouter = require('./routes/navlinks');
@@ -13,11 +15,13 @@ const uploadRoute = require('./routes/upload');
 const ordersRouter = require('./routes/orders');
 const checkoutRouter = require('./routes/checkout');
 
-const app = express();
-
 // Allow listed origins for local development
 const corsOptions = {
-  origin: ['http://localhost:3000', 'http://192.168.0.106:3000', 'http://localhost:3001'],
+  origin: [
+    'http://localhost:3000',
+    'http://192.168.0.106:3000',
+    'http://localhost:3001',
+  ],
   credentials: true,
 };
 
@@ -41,9 +45,11 @@ app.use('/api/upload', uploadRoute);
 app.use('/api/orders', ordersRouter);
 app.use('/api/checkout', checkoutRouter);
 
+// Health check route
+app.get('/', (_req, res) => res.send('API is running'));
+
 // Start server
 const PORT = process.env.PORT || 5000;
-
 if (require.main === module) {
   app.listen(PORT, () => {
     console.log(`🟢 Server running on → http://localhost:${PORT}`);
