@@ -21,6 +21,7 @@ const corsOptions = {
     'http://localhost:3000',
     'http://192.168.0.106:3000',
     'http://localhost:3001',
+    'https://mahaveerpaperenterprises-sand.vercel.app',
   ],
   credentials: true,
 };
