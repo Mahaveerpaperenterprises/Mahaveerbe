@@ -7,15 +7,20 @@ const fs = require('fs');
 const router = express.Router();
 
 const isVercel = !!process.env.VERCEL;
-const uploadDir = isVercel ? path.join('/tmp', 'uploads') : path.join(__dirname, '..', 'uploads');
+const uploadDir = isVercel
+  ? path.join('/tmp', 'uploads')
+  : path.join(__dirname, '..', 'uploads');
 
 try {
-  if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+  if (!fs.existsSync(uploadDir)) {
+    fs.mkdirSync(uploadDir, { recursive: true });
+  }
 } catch {}
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, uploadDir),
-  filename: (req, file, cb) => cb(null, Date.now() + '-' + file.originalname.replace(/\s+/g, '_')),
+  filename: (req, file, cb) =>
+    cb(null, Date.now() + '-' + file.originalname.replace(/\s+/g, '_')),
 });
 const upload = multer({ storage });
 
@@ -38,7 +43,9 @@ router.post('/', upload.array('images'), async (req, res) => {
     const body = req.body;
     const files = req.files || [];
 
-    const fileUrls = files.map((f) => `${req.protocol}://${req.get('host')}/uploads/${f.filename}`);
+    const fileUrls = files.map(
+      (f) => `${req.protocol}://${req.get('host')}/uploads/${f.filename}`
+    );
 
     let urlImages = [];
     if (Array.isArray(body.imageUrls)) {
@@ -49,28 +56,41 @@ router.post('/', upload.array('images'), async (req, res) => {
         : body.imageUrls.split(',').map((s) => s.trim()).filter(Boolean);
     }
 
-    const inlineImages = Array.isArray(body.images) ? body.images.filter(Boolean) : [];
+    const inlineImages = Array.isArray(body.images)
+      ? body.images.filter(Boolean)
+      : [];
+
     const allImages = [...urlImages, ...inlineImages, ...fileUrls];
 
-    if (!body.name || !body.brand || !body.category_slug || !body.description || allImages.length === 0) {
-      return res.status(400).json({ error: 'Missing required fields: name, brand, category_slug, description, or at least one image' });
+    if (
+      !body.name ||
+      !body.brand ||
+      !body.category_slug ||
+      !body.description ||
+      allImages.length === 0
+    ) {
+      return res.status(400).json({
+        error:
+          'Missing required fields: name, brand, category_slug, description, or at least one image',
+      });
     }
 
     const price = toNumberOrNull(body.price);
-    if (price === null) return res.status(400).json({ error: 'price must be a valid number' });
-
     const discount_b2b = clampPercent(body.discount_b2b);
     const discount_b2c = clampPercent(body.discount_b2c);
-    const published = typeof body.published === 'string' ? body.published === 'true' : Boolean(body.published ?? true);
+    const published =
+      typeof body.published === 'string'
+        ? body.published === 'true'
+        : Boolean(body.published ?? true);
 
     const { rows } = await pool.query(
-      `INSERT INTO products
+      `INSERT INTO "Products"
          (name, model_name, brand, category_slug, price,
           discount_b2b, discount_b2c,
           description, images, published)
        VALUES ($1, $2, $3, $4, $5,
                $6, $7,
-               $8, $9::text[], $10)
+               $8, $9::jsonb, $10)
        RETURNING id`,
       [
         body.name,
@@ -81,13 +101,13 @@ router.post('/', upload.array('images'), async (req, res) => {
         discount_b2b,
         discount_b2c,
         body.description,
-        allImages,
+        JSON.stringify(allImages),
         published,
       ]
     );
 
     return res.status(201).json({ message: 'Product saved', id: rows[0].id });
-  } catch (err) {
+  } catch {
     return res.status(500).json({ error: 'Failed to save product' });
   }
 });
@@ -117,11 +137,10 @@ router.get('/', async (req, res) => {
     params.push(perPage, offset);
 
     const productsQuery = `
-      SELECT
-        id, name, model_name, brand, category_slug,
-        price, discount_b2b, discount_b2c,
-        description, images, published, created_at
-      FROM products
+      SELECT id, name, model_name, brand, category_slug,
+             price, discount_b2b, discount_b2c,
+             description, images, published, created_at
+      FROM "Products"
       ${where}
       ORDER BY created_at DESC
       LIMIT $${params.length - 1}
@@ -133,9 +152,10 @@ router.get('/', async (req, res) => {
     const countParams = params.slice(0, params.length - 2);
     const countQuery = `
       SELECT COUNT(*) AS total
-      FROM products
+      FROM "Products"
       ${where}
     `;
+
     const countResult = await pool.query(countQuery, countParams);
     const total = Number(countResult.rows[0].total);
 
@@ -149,7 +169,12 @@ router.get('/', async (req, res) => {
     });
 
     res.setHeader('Cache-Control', 'public, max-age=300');
-    return res.json({ page: pageNum, limit: perPage, total, items });
+    return res.json({
+      page: pageNum,
+      limit: perPage,
+      total,
+      items,
+    });
   } catch {
     return res.status(500).json({ error: 'Failed to fetch products from database' });
   }
