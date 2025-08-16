@@ -14,6 +14,7 @@ const authRouter = require('./routes/auth');
 const uploadRoute = require('./routes/upload');
 const ordersRouter = require('./routes/orders');
 const checkoutRouter = require('./routes/checkout');
+const reviewsRouter = require('./routes/reviews');
 
 // Allow listed origins for local development
 const corsOptions = {
@@ -45,6 +46,8 @@ app.use('/api/auth', authRouter);
 app.use('/api/upload', uploadRoute);
 app.use('/api/orders', ordersRouter);
 app.use('/api/checkout', checkoutRouter);
+app.use('/api/reviews', reviewsRouter);
+
 
 // Health check route
 app.get('/', (_req, res) => res.send('API is running'));
