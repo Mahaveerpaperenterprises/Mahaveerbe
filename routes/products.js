@@ -6,37 +6,39 @@ const fs = require('fs');
 
 const router = express.Router();
 
-/* Use /tmp on Vercel (read/write), local "uploads" otherwise */
 const isVercel = !!process.env.VERCEL;
-const uploadDir = isVercel
-  ? path.join('/tmp', 'uploads')
-  : path.join(__dirname, '..', 'uploads');
+const uploadDir = isVercel ? path.join('/tmp', 'uploads') : path.join(__dirname, '..', 'uploads');
 
 try {
-  if (!fs.existsSync(uploadDir)) {
-    fs.mkdirSync(uploadDir, { recursive: true });
-  }
-} catch (e) {
-  console.error('Failed to ensure upload dir:', uploadDir, e);
-}
+  if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+} catch {}
 
-/* Multer storage */
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, uploadDir),
-  filename: (req, file, cb) =>
-    cb(null, Date.now() + '-' + file.originalname.replace(/\s+/g, '_')),
+  filename: (req, file, cb) => cb(null, Date.now() + '-' + file.originalname.replace(/\s+/g, '_')),
 });
 const upload = multer({ storage });
 
-/* ---------- CREATE PRODUCT (supports files + URLs + inline) ---------- */
+const clampPercent = (n) => {
+  const x = Number(n);
+  if (!Number.isFinite(x)) return 0;
+  if (x < 0) return 0;
+  if (x > 100) return 100;
+  return x;
+};
+
+const toNumberOrNull = (v) => {
+  if (v === '' || v === null || v === undefined) return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+};
+
 router.post('/', upload.array('images'), async (req, res) => {
   try {
     const body = req.body;
     const files = req.files || [];
 
-    const fileUrls = files.map(
-      (f) => `${req.protocol}://${req.get('host')}/uploads/${f.filename}`
-    );
+    const fileUrls = files.map((f) => `${req.protocol}://${req.get('host')}/uploads/${f.filename}`);
 
     let urlImages = [];
     if (Array.isArray(body.imageUrls)) {
@@ -47,50 +49,49 @@ router.post('/', upload.array('images'), async (req, res) => {
         : body.imageUrls.split(',').map((s) => s.trim()).filter(Boolean);
     }
 
-    const inlineImages = Array.isArray(body.images)
-      ? body.images.filter(Boolean)
-      : [];
-
+    const inlineImages = Array.isArray(body.images) ? body.images.filter(Boolean) : [];
     const allImages = [...urlImages, ...inlineImages, ...fileUrls];
 
-    if (
-      !body.name ||
-      !body.brand ||
-      !body.category_slug ||
-      !body.description ||
-      allImages.length === 0
-    ) {
-      return res.status(400).json({
-        error:
-          'Missing required fields: name, brand, category_slug, description, or at least one image',
-      });
+    if (!body.name || !body.brand || !body.category_slug || !body.description || allImages.length === 0) {
+      return res.status(400).json({ error: 'Missing required fields: name, brand, category_slug, description, or at least one image' });
     }
 
+    const price = toNumberOrNull(body.price);
+    if (price === null) return res.status(400).json({ error: 'price must be a valid number' });
+
+    const discount_b2b = clampPercent(body.discount_b2b);
+    const discount_b2c = clampPercent(body.discount_b2c);
+    const published = typeof body.published === 'string' ? body.published === 'true' : Boolean(body.published ?? true);
+
     const { rows } = await pool.query(
-      `INSERT INTO "Products"
-         (name, model_name, brand, category_slug, price, discountedPrice, description, images)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      `INSERT INTO products
+         (name, model_name, brand, category_slug, price,
+          discount_b2b, discount_b2c,
+          description, images, published)
+       VALUES ($1, $2, $3, $4, $5,
+               $6, $7,
+               $8, $9::text[], $10)
        RETURNING id`,
       [
         body.name,
         body.model_name || null,
         body.brand,
         body.category_slug,
-        body.price ? parseFloat(body.price) : null,
-        body.discountedPrice ? parseFloat(body.discountedPrice) : null,
+        price,
+        discount_b2b,
+        discount_b2c,
         body.description,
-        JSON.stringify(allImages),
+        allImages,
+        published,
       ]
     );
 
     return res.status(201).json({ message: 'Product saved', id: rows[0].id });
   } catch (err) {
-    console.error('Error inserting product:', err);
     return res.status(500).json({ error: 'Failed to save product' });
   }
 });
 
-/* ---------- LIST PRODUCTS ---------- */
 router.get('/', async (req, res) => {
   let { category = 'all', page = 1, limit = 20, brand } = req.query;
 
@@ -116,8 +117,11 @@ router.get('/', async (req, res) => {
     params.push(perPage, offset);
 
     const productsQuery = `
-      SELECT id, name, model_name, brand, category_slug, price, discountedPrice, description, images
-      FROM "Products"
+      SELECT
+        id, name, model_name, brand, category_slug,
+        price, discount_b2b, discount_b2c,
+        description, images, published, created_at
+      FROM products
       ${where}
       ORDER BY created_at DESC
       LIMIT $${params.length - 1}
@@ -129,25 +133,26 @@ router.get('/', async (req, res) => {
     const countParams = params.slice(0, params.length - 2);
     const countQuery = `
       SELECT COUNT(*) AS total
-      FROM "Products"
+      FROM products
       ${where}
     `;
-
     const countResult = await pool.query(countQuery, countParams);
     const total = Number(countResult.rows[0].total);
 
-    res.setHeader('Cache-Control', 'public, max-age=300');
-    return res.json({
-      page: pageNum,
-      limit: perPage,
-      total,
-      items: products.rows,
+    const items = (products.rows || []).map((r) => {
+      const price = Number(r.price) || 0;
+      const dB2B = clampPercent(r.discount_b2b);
+      const dB2C = clampPercent(r.discount_b2c);
+      const b2b_price = price ? Number((price * (1 - dB2B / 100)).toFixed(2)) : 0;
+      const b2c_price = price ? Number((price * (1 - dB2C / 100)).toFixed(2)) : 0;
+      return { ...r, b2b_price, b2c_price };
     });
-  } catch (err) {
-    console.error('DB Fetch Error:', err);
+
+    res.setHeader('Cache-Control', 'public, max-age=300');
+    return res.json({ page: pageNum, limit: perPage, total, items });
+  } catch {
     return res.status(500).json({ error: 'Failed to fetch products from database' });
   }
 });
-
 
 module.exports = router;
