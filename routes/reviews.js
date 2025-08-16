@@ -5,10 +5,15 @@ const router = express.Router();
 router.post('/', async (req, res) => {
   try {
     let { product_id, user_name, user_email, rating, title, body, images } = req.body || {};
-
     const r = Number(rating);
-    if (!Number.isFinite(r) || r < 1 || r > 5) {
-      return res.status(400).json({ error: 'Invalid rating' });
+    if (!Number.isFinite(r) || r < 1 || r > 5) return res.status(400).json({ error: 'Invalid rating' });
+
+    const pidRaw = product_id;
+    let pid = pidRaw;
+    if (pid == null || pid === '') {
+      pid = 'home';
+    } else if (typeof pid !== 'string') {
+      pid = String(pid);
     }
 
     if (Array.isArray(images)) {
@@ -20,21 +25,17 @@ router.post('/', async (req, res) => {
       images = null;
     }
 
+    user_name = typeof user_name === 'string' && user_name.trim() ? user_name.trim() : null;
+    user_email = typeof user_email === 'string' && user_email.trim() ? user_email.trim() : null;
+    title = typeof title === 'string' && title.trim() ? title.trim() : null;
+    body = typeof body === 'string' && body.trim() ? body.trim() : null;
+
     const q = `
       INSERT INTO "ProductReviews"(product_id, user_name, user_email, rating, title, body, images)
       VALUES ($1,$2,$3,$4,$5,$6,$7)
       RETURNING id, product_id, user_name, user_email, rating, title, body, images, helpful, created_at, updated_at
     `;
-    const vals = [
-      product_id ?? null,
-      user_name ?? null,
-      user_email ?? null,
-      r,
-      title ?? null,
-      body ?? null,
-      images ? JSON.stringify(images) : null,
-    ];
-
+    const vals = [pid, user_name, user_email, r, title, body, images ? JSON.stringify(images) : null];
     const { rows } = await db.query(q, vals);
     res.status(201).json(rows[0]);
   } catch (e) {
@@ -47,7 +48,6 @@ router.get('/', async (req, res) => {
     const { productId, limit, offset } = req.query;
     const lim = Math.min(parseInt(limit || '20', 10), 100);
     const off = parseInt(offset || '0', 10);
-
     const q = `
       SELECT id, product_id, user_name, user_email, rating, title, body, images, helpful, created_at, updated_at
       FROM "ProductReviews"
@@ -55,8 +55,7 @@ router.get('/', async (req, res) => {
       ORDER BY created_at DESC
       LIMIT $${productId ? 2 : 1} OFFSET $${productId ? 3 : 2}
     `;
-
-    const params = productId ? [productId, lim, off] : [lim, off];
+    const params = productId ? [String(productId), lim, off] : [lim, off];
     const { rows } = await db.query(q, params);
     res.json(rows);
   } catch (e) {
