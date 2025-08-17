@@ -11,14 +11,14 @@ const OTP_TTL_MINUTES = 10;
 const MAX_VERIFY_ATTEMPTS = 5;
 const SHOW_404_WHEN_NOT_FOUND = true;
 
+const smtpConfigured = Boolean(process.env.SMTP_USER && process.env.SMTP_PASS);
 const transporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST || 'smtp.gmail.com',
   port: Number(process.env.SMTP_PORT || 465),
   secure: String(process.env.SMTP_SECURE || 'true') === 'true',
-  auth: {
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS,
-  },
+  auth: smtpConfigured
+    ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS }
+    : undefined,
 });
 
 function generateOtp() {
@@ -26,13 +26,15 @@ function generateOtp() {
 }
 
 async function sendOtpEmail({ to, otp }) {
-  await transporter.sendMail({
+  if (!smtpConfigured) return { emailSent: false };
+  const info = await transporter.sendMail({
     from: process.env.SMTP_FROM || process.env.SMTP_USER,
     to,
     subject: 'Your password reset code',
     text: `Your OTP is ${otp}. It expires in ${OTP_TTL_MINUTES} minutes.`,
     html: `<div style="font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial"><p>Use this code to reset your password:</p><p style="font-size:22px;font-weight:700;letter-spacing:2px">${otp}</p><p>This code expires in ${OTP_TTL_MINUTES} minutes.</p></div>`,
   });
+  return { emailSent: !!info.messageId };
 }
 
 router.post('/signup', async (req, res) => {
@@ -50,7 +52,7 @@ router.post('/signup', async (req, res) => {
     return res.status(201).json({ message: 'User created', id: result.rows[0].id });
   } catch (err) {
     if (String(err.code) === '23505') return res.status(409).json({ error: 'Email already registered' });
-    return res.status(500).json({ error: 'Signup failed' });
+    return res.status(500).json({ error: 'Signup failed', detail: String(err.message || err) });
   }
 });
 
@@ -68,8 +70,8 @@ router.post('/login', async (req, res) => {
     const isMatch = await bcrypt.compare(b2cPassword, user.password);
     if (!isMatch) return res.status(401).json({ error: 'Invalid credentials' });
     return res.json({ message: 'Login successful', userId: user.id, name: user.name });
-  } catch {
-    return res.status(500).json({ error: 'Login failed' });
+  } catch (err) {
+    return res.status(500).json({ error: 'Login failed', detail: String(err.message || err) });
   }
 });
 
@@ -82,7 +84,7 @@ router.post('/forgot/request', async (req, res) => {
     const user = q.rows[0];
     if (!user) {
       if (SHOW_404_WHEN_NOT_FOUND) return res.status(404).json({ error: 'Email not found' });
-      return res.json({ ok: true });
+      return res.json({ ok: true, emailSent: false });
     }
     const otp = generateOtp();
     const otpHash = await bcrypt.hash(otp, 10);
@@ -96,10 +98,15 @@ router.post('/forgot/request', async (req, res) => {
        WHERE id = $1`,
       [user.id, otpHash, expiresAt]
     );
-    await sendOtpEmail({ to: emailLc, otp });
-    return res.json({ ok: true });
-  } catch {
-    return res.status(500).json({ error: 'Could not start reset' });
+    let emailResult = { emailSent: false };
+    try {
+      emailResult = await sendOtpEmail({ to: emailLc, otp });
+    } catch (e) {
+      emailResult = { emailSent: false, error: String(e.message || e) };
+    }
+    return res.json({ ok: true, emailSent: emailResult.emailSent === true });
+  } catch (err) {
+    return res.status(500).json({ error: 'Could not start reset', detail: String(err.message || err) });
   }
 });
 
@@ -122,8 +129,8 @@ router.post('/forgot/verify', async (req, res) => {
     await pool.query(`UPDATE "Users" SET reset_attempts = reset_attempts + 1 WHERE id = $1`, [row.id]);
     if (!ok) return res.status(400).json({ error: 'Invalid OTP' });
     return res.json({ ok: true });
-  } catch {
-    return res.status(500).json({ error: 'Verification failed' });
+  } catch (err) {
+    return res.status(500).json({ error: 'Verification failed', detail: String(err.message || err) });
   }
 });
 
@@ -160,21 +167,23 @@ router.post('/forgot/reset', async (req, res) => {
       [row.id, hashed]
     );
     return res.json({ ok: true });
-  } catch {
-    return res.status(500).json({ error: 'Reset failed' });
+  } catch (err) {
+    return res.status(500).json({ error: 'Reset failed', detail: String(err.message || err) });
   }
 });
 
 router.get('/email/test', async (req, res) => {
   try {
     const to = req.query.to || process.env.SMTP_USER;
-    await transporter.sendMail({
-      from: process.env.SMTP_FROM || process.env.SMTP_USER,
-      to,
-      subject: 'Test Email',
-      text: 'If you see this, your SMTP setup works.',
-    });
-    res.json({ ok: true });
+    const info = smtpConfigured
+      ? await transporter.sendMail({
+          from: process.env.SMTP_FROM || process.env.SMTP_USER,
+          to,
+          subject: 'Test Email',
+          text: 'If you see this, your SMTP setup works.',
+        })
+      : { messageId: null };
+    res.json({ ok: true, emailSent: !!info.messageId, smtpConfigured });
   } catch (e) {
     res.status(500).json({ error: String(e?.message || e) });
   }
