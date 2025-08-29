@@ -1,6 +1,5 @@
 const express = require('express');
 const pool = require('../db');
-
 const router = express.Router();
 
 const ensureLeadingSlash = (p) => (p.startsWith('/') ? p : '/' + p);
@@ -117,6 +116,91 @@ router.post('/add-category-slug', async (req, res) => {
   } finally {
     client.release();
   }
+});
+
+router.post('/add-product', async (req, res) => {
+  const { category_slug } = req.body;
+
+  const existingCategory = await pool.query(
+    `SELECT id FROM "NavLinks" WHERE slug = $1 LIMIT 1`,
+    [category_slug]
+  );
+
+  if (existingCategory.rows.length === 0) {
+    await pool.query(
+      `INSERT INTO "NavLinks" (label, slug, display_order)
+       VALUES ($1, $2, 1)`,
+      ['New Category Label', category_slug]
+    );
+  }
+
+  const body = req.body;
+  const files = req.files || [];
+
+  const fileUrls = files.map(
+    (f) => `${req.protocol}://${req.get('host')}/uploads/${f.filename}`
+  );
+
+  let urlImages = [];
+  if (Array.isArray(body.imageUrls)) {
+    urlImages = body.imageUrls.filter(Boolean);
+  } else if (typeof body.imageUrls === 'string') {
+    urlImages = body.imageUrls.trim().startsWith('data:')
+      ? [body.imageUrls.trim()]
+      : body.imageUrls.split(',').map((s) => s.trim()).filter(Boolean);
+  }
+
+  const inlineImages = Array.isArray(body.images)
+    ? body.images.filter(Boolean)
+    : [];
+
+  const allImages = [...urlImages, ...inlineImages, ...fileUrls];
+
+  if (
+    !body.name ||
+    !body.brand ||
+    !body.category_slug ||
+    !body.description ||
+    allImages.length === 0
+  ) {
+    return res.status(400).json({
+      error:
+        'Missing required fields: name, brand, category_slug, description, or at least one image',
+    });
+  }
+
+  const price = toNumberOrNull(body.price);
+  const discount_b2b = clampPercent(body.discount_b2b);
+  const discount_b2c = clampPercent(body.discount_b2c);
+  const published =
+    typeof body.published === 'string'
+      ? body.published === 'true'
+      : Boolean(body.published ?? true);
+
+  const { rows } = await pool.query(
+    `INSERT INTO "Products"
+       (name, model_name, brand, category_slug, price,
+        discount_b2b, discount_b2c,
+        description, images, published)
+     VALUES ($1, $2, $3, $4, $5,
+             $6, $7,
+             $8, $9::jsonb, $10)
+     RETURNING id`,
+    [
+      body.name,
+      body.model_name || null,
+      body.brand,
+      body.category_slug,
+      price,
+      discount_b2b,
+      discount_b2c,
+      body.description,
+      JSON.stringify(allImages),
+      published,
+    ]
+  );
+
+  return res.status(201).json({ message: 'Product saved', id: rows[0].id });
 });
 
 module.exports = router;
