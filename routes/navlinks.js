@@ -87,4 +87,36 @@ router.post('/', async (req, res) => {
   }
 });
 
+router.post('/add-category-slug', async (req, res) => {
+  const { category_slug, label } = req.body;
+  if (!category_slug || !label) return res.status(400).json({ error: 'Category slug and label are required' });
+
+  const client = await pool.connect();
+  try {
+    const existingCategory = await client.query(
+      `SELECT id FROM "NavLinks" WHERE slug = $1 LIMIT 1`,
+      [category_slug]
+    );
+    if (existingCategory.rows.length > 0) {
+      return res.status(200).json({ message: 'Category slug already exists' });
+    }
+
+    await client.query('BEGIN');
+
+    const { rows } = await client.query(
+      `INSERT INTO "NavLinks" (label, slug, display_order)
+       VALUES ($1,$2,$3) RETURNING id`,
+      [label, ensureLeadingSlash(category_slug), 1]
+    );
+    await client.query('COMMIT');
+
+    res.status(201).json({ message: 'New category added successfully', id: rows[0].id });
+  } catch (e) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: 'Error occurred while adding category slug' });
+  } finally {
+    client.release();
+  }
+});
+
 module.exports = router;
