@@ -93,20 +93,23 @@ router.post('/add-category-slug', async (req, res) => {
 
   const client = await pool.connect();
   try {
-    const existingCategory = await client.query(
-      `SELECT id FROM "NavLinks" WHERE slug = $1 LIMIT 1`,
-      [category_slug]
+    const normalized = ensureLeadingSlash(String(category_slug).trim().toLowerCase());
+    const leaf = normalized.replace(/^\/+/, '');
+    const regex = `(^|/)${leaf}$`;
+
+    const existing = await client.query(
+      `SELECT id FROM "NavLinks" WHERE lower(slug) = $1 OR slug ~* $2 LIMIT 1`,
+      [normalized, regex]
     );
-    if (existingCategory.rows.length > 0) {
+    if (existing.rows.length > 0) {
       return res.status(200).json({ message: 'Category slug already exists' });
     }
 
     await client.query('BEGIN');
-
     const { rows } = await client.query(
       `INSERT INTO "NavLinks" (label, slug, display_order)
        VALUES ($1,$2,$3) RETURNING id`,
-      [label, ensureLeadingSlash(category_slug), 1]
+      [label, normalized, 1]
     );
     await client.query('COMMIT');
 
