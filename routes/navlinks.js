@@ -88,7 +88,7 @@ router.post('/', async (req, res) => {
 });
 
 router.post('/add-category-slug', async (req, res) => {
-  const { category_slug, label } = req.body;
+  const { category_slug, label, parent_slug } = req.body;
   if (!category_slug || !label) return res.status(400).json({ error: 'Category slug and label are required' });
 
   const client = await pool.connect();
@@ -105,11 +105,17 @@ router.post('/add-category-slug', async (req, res) => {
       return res.status(200).json({ message: 'Category slug already exists' });
     }
 
+    let parentId = null;
+    if (parent_slug) {
+      const parentRow = await client.query(`SELECT id FROM "NavLinks" WHERE replace(slug,'/','-') = $1 LIMIT 1`, [parent_slug]);
+      if (parentRow.rows.length > 0) parentId = parentRow.rows[0].id;
+    }
+
     await client.query('BEGIN');
     const { rows } = await client.query(
-      `INSERT INTO "NavLinks" (label, slug, display_order)
-       VALUES ($1,$2,$3) RETURNING id`,
-      [label, normalized, 1]
+      `INSERT INTO "NavLinks" (label, slug, display_order, parent_id)
+       VALUES ($1,$2,$3,$4) RETURNING id`,
+      [label, normalized, 1, parentId]
     );
     await client.query('COMMIT');
 
