@@ -56,9 +56,9 @@ router.post('/', async (req, res) => {
     await client.query('BEGIN');
 
     const { rows } = await client.query(
-      `INSERT INTO "NavLinks" (label, slug, display_order)
-       VALUES ($1,$2,$3) RETURNING id`,
-      [root.title, ensureLeadingSlash(root.path), root.order ?? 1]
+      `INSERT INTO "NavLinks" (label, slug, display_order, published)
+       VALUES ($1,$2,$3,$4) RETURNING id`,
+      [root.title, ensureLeadingSlash(root.path), root.order ?? 1, true]
     );
     const rootId = rows[0].id;
 
@@ -66,9 +66,9 @@ router.post('/', async (req, res) => {
       for (const it of items ?? []) {
         if (!it.title || !it.path) throw new Error('submenu items need title and path');
         const { rows: r2 } = await client.query(
-          `INSERT INTO "NavLinks" (label, slug, display_order, parent_id)
-           VALUES ($1,$2,$3,$4) RETURNING id`,
-          [it.title, ensureLeadingSlash(it.path), it.order ?? 1, parentId]
+          `INSERT INTO "NavLinks" (label, slug, display_order, parent_id, published)
+           VALUES ($1,$2,$3,$4,$5) RETURNING id`,
+          [it.title, ensureLeadingSlash(it.path), it.order ?? 1, parentId, true]
         );
         if (Array.isArray(it.submenu) && it.submenu.length) {
           await addKids(it.submenu, r2[0].id);
@@ -107,15 +107,16 @@ router.post('/add-category-slug', async (req, res) => {
 
     let parentId = null;
     if (parent_slug) {
-      const parentRow = await client.query(`SELECT id FROM "NavLinks" WHERE replace(slug,'/','-') = $1 LIMIT 1`, [parent_slug]);
+      const parentFullSlug = ensureLeadingSlash(String(parent_slug).trim().toLowerCase().replace(/^-+/, '').replace(/-/g, '/'));
+      const parentRow = await client.query(`SELECT id FROM "NavLinks" WHERE lower(slug) = $1 LIMIT 1`, [parentFullSlug]);
       if (parentRow.rows.length > 0) parentId = parentRow.rows[0].id;
     }
 
     await client.query('BEGIN');
     const { rows } = await client.query(
-      `INSERT INTO "NavLinks" (label, slug, display_order, parent_id)
-       VALUES ($1,$2,$3,$4) RETURNING id`,
-      [label, normalized, 1, parentId]
+      `INSERT INTO "NavLinks" (label, slug, display_order, parent_id, published)
+       VALUES ($1,$2,$3,$4,$5) RETURNING id`,
+      [label, normalized, 1, parentId, true]
     );
     await client.query('COMMIT');
 
