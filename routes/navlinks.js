@@ -62,20 +62,21 @@ router.post('/', async (req, res) => {
     );
     const rootId = rows[0].id;
 
-    const addKids = async (items, parentId) => {
+    const addKids = async (items, parentId, parentSlug) => {
       for (const it of items ?? []) {
-        if (!it.title || !it.path) throw new Error('submenu items need title and path');
+        const leaf = ensureLeadingSlash(it.path).replace(/^\/+/, '');
+        const fullSlug = ensureLeadingSlash(`${parentSlug}/${leaf}`.replace(/\/+/g, '/'));
         const { rows: r2 } = await client.query(
           `INSERT INTO "NavLinks" (label, slug, display_order, parent_id, published)
-           VALUES ($1,$2,$3,$4,$5) RETURNING id`,
-          [it.title, ensureLeadingSlash(it.path), it.order ?? 1, parentId, true]
+           VALUES ($1,$2,$3,$4,$5) RETURNING id, slug`,
+          [it.title, fullSlug, it.order ?? 1, parentId, true]
         );
         if (Array.isArray(it.submenu) && it.submenu.length) {
-          await addKids(it.submenu, r2[0].id);
+          await addKids(it.submenu, r2[0].id, r2[0].slug);
         }
       }
     };
-    await addKids(root.submenu, rootId);
+    await addKids(root.submenu, rootId, ensureLeadingSlash(root.path));
 
     await client.query('COMMIT');
     res.status(201).json({ message: 'Menu saved', id: rootId });
@@ -93,30 +94,40 @@ router.post('/add-category-slug', async (req, res) => {
 
   const client = await pool.connect();
   try {
-    const normalized = ensureLeadingSlash(String(category_slug).trim().toLowerCase());
-    const leaf = normalized.replace(/^\/+/, '');
-    const regex = `(^|/)${leaf}$`;
+    const normalizedLeaf = ensureLeadingSlash(String(category_slug).trim().toLowerCase()).replace(/^\/+/, '');
+    const leafRegex = `(^|/)${normalizedLeaf}$`;
 
-    const existing = await client.query(
+    const exists = await client.query(
       `SELECT id FROM "NavLinks" WHERE lower(slug) = $1 OR slug ~* $2 LIMIT 1`,
-      [normalized, regex]
+      ['/' + normalizedLeaf, leafRegex]
     );
-    if (existing.rows.length > 0) {
+    if (exists.rows.length > 0) {
       return res.status(200).json({ message: 'Category slug already exists' });
     }
 
     let parentId = null;
+    let fullSlug = '/' + normalizedLeaf;
+
     if (parent_slug) {
-      const parentFullSlug = ensureLeadingSlash(String(parent_slug).trim().toLowerCase().replace(/^-+/, '').replace(/-/g, '/'));
-      const parentRow = await client.query(`SELECT id FROM "NavLinks" WHERE lower(slug) = $1 LIMIT 1`, [parentFullSlug]);
-      if (parentRow.rows.length > 0) parentId = parentRow.rows[0].id;
+      const parentByKey = await client.query(
+        `SELECT id, slug
+         FROM "NavLinks"
+         WHERE regexp_replace(replace(lower(slug),'/','-'), '^-+', '') = lower($1)
+         LIMIT 1`,
+        [String(parent_slug).trim()]
+      );
+      if (parentByKey.rows.length) {
+        parentId = parentByKey.rows[0].id;
+        const parentFull = parentByKey.rows[0].slug;
+        fullSlug = ensureLeadingSlash(`${parentFull}/${normalizedLeaf}`.replace(/\/+/g, '/'));
+      }
     }
 
     await client.query('BEGIN');
     const { rows } = await client.query(
       `INSERT INTO "NavLinks" (label, slug, display_order, parent_id, published)
        VALUES ($1,$2,$3,$4,$5) RETURNING id`,
-      [label, normalized, 1, parentId, true]
+      [label, fullSlug, 1, parentId, true]
     );
     await client.query('COMMIT');
 
