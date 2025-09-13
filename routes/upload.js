@@ -1,42 +1,23 @@
 const express = require('express');
 const multer = require('multer');
-const path = require('path');
-const fs = require('fs');
+const { uploadBufferToSpaces } = require('../lib/spaces');
 
 const router = express.Router();
 
-const isVercel = !!process.env.VERCEL;
-const uploadDir = isVercel
-  ? path.join('/tmp', 'uploads')
-  : path.join(__dirname, '..', 'uploads');
+const upload = multer({ storage: multer.memoryStorage() });
 
-try {
-  if (!fs.existsSync(uploadDir)) {
-    fs.mkdirSync(uploadDir, { recursive: true });
+router.post('/', upload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+
+    const { buffer, mimetype, originalname } = req.file;
+    const { url } = await uploadBufferToSpaces(buffer, mimetype, originalname);
+
+    return res.status(200).json({ url });
+  } catch (err) {
+    console.error('Spaces upload failed:', err);
+    return res.status(500).json({ error: 'Upload failed' });
   }
-} catch (e) {
-  console.error('Failed to ensure upload dir:', uploadDir, e);
-}
-
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, uploadDir),
-  filename: (req, file, cb) => {
-    const uniqueName = Date.now() + '-' + file.originalname.replace(/\s+/g, '_');
-    cb(null, uniqueName);
-  },
-});
-
-const upload = multer({ storage });
-
-router.post('/', upload.single('file'), (req, res) => {
-  if (!req.file) {
-    return res.status(400).json({ error: 'No file uploaded' });
-  }
-
-  const baseUrl = `${req.protocol}://${req.get('host')}`;
-  const fileUrl = `${baseUrl}/uploads/${req.file.filename}`;
-
-  res.status(200).json({ url: fileUrl });
 });
 
 module.exports = router;

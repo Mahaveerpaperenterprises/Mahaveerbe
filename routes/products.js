@@ -1,28 +1,11 @@
 const express = require('express');
 const pool = require('../db');
 const multer = require('multer');
-const path = require('path');
-const fs = require('fs');
+const { uploadBufferToSpaces } = require('../lib/spaces');
 
 const router = express.Router();
 
-const isVercel = !!process.env.VERCEL;
-const uploadDir = isVercel
-  ? path.join('/tmp', 'uploads')
-  : path.join(__dirname, '..', 'uploads');
-
-try {
-  if (!fs.existsSync(uploadDir)) {
-    fs.mkdirSync(uploadDir, { recursive: true });
-  }
-} catch {}
-
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, uploadDir),
-  filename: (req, file, cb) =>
-    cb(null, Date.now() + '-' + file.originalname.replace(/\s+/g, '_')),
-});
-const upload = multer({ storage });
+const upload = multer({ storage: multer.memoryStorage() });
 
 const clampPercent = (n) => {
   const x = Number(n);
@@ -43,9 +26,12 @@ router.post('/', upload.array('images'), async (req, res) => {
     const body = req.body;
     const files = req.files || [];
 
-    const fileUrls = files.map(
-      (f) => `${req.protocol}://${req.get('host')}/uploads/${f.filename}`
-    );
+    const fileUrls = [];
+    for (const f of files) {
+      const { buffer, mimetype, originalname } = f;
+      const { url } = await uploadBufferToSpaces(buffer, mimetype, originalname);
+      fileUrls.push(url);
+    }
 
     let urlImages = [];
     if (Array.isArray(body.imageUrls)) {
@@ -107,7 +93,8 @@ router.post('/', upload.array('images'), async (req, res) => {
     );
 
     return res.status(201).json({ message: 'Product saved', id: rows[0].id });
-  } catch {
+  } catch (e) {
+    console.error('Create product failed:', e);
     return res.status(500).json({ error: 'Failed to save product' });
   }
 });
