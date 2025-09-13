@@ -121,7 +121,11 @@ router.get('/', async (req, res) => {
       where += ` AND category_slug = $${params.length}`;
     }
 
-    params.push(perPage, offset);
+    params.push(perPage);
+    const limitIdx = params.length;
+
+    params.push(offset);
+    const offsetIdx = params.length;
 
     const productsQuery = `
       SELECT id, name, model_name, brand, category_slug,
@@ -130,13 +134,13 @@ router.get('/', async (req, res) => {
       FROM "Products"
       ${where}
       ORDER BY created_at DESC
-      LIMIT $${params.length - 1}
-      OFFSET $${params.length}
+      LIMIT $${limitIdx}
+      OFFSET $${offsetIdx}
     `;
 
     const products = await pool.query(productsQuery, params);
 
-    const countParams = params.slice(0, params.length - 2);
+    const countParams = params.slice(0, limitIdx - 1);
     const countQuery = `
       SELECT COUNT(*) AS total
       FROM "Products"
@@ -162,7 +166,8 @@ router.get('/', async (req, res) => {
       total,
       items,
     });
-  } catch {
+  } catch (e) {
+    console.error('Fetch products failed:', e);
     return res.status(500).json({ error: 'Failed to fetch products from database' });
   }
 });
