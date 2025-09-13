@@ -42,13 +42,22 @@ router.post('/', upload.array('images'), async (req, res) => {
         : body.imageUrls.split(',').map((s) => s.trim()).filter(Boolean);
     }
 
-    const inlineImages = Array.isArray(body.images) ? body.images.filter(Boolean) : [];
+    const inlineImages = Array.isArray(body.images)
+      ? body.images.filter(Boolean)
+      : [];
 
     const allImages = [...urlImages, ...inlineImages, ...fileUrls];
 
-    if (!body.name || !body.brand || !body.category_slug || !body.description || allImages.length === 0) {
+    if (
+      !body.name ||
+      !body.brand ||
+      !body.category_slug ||
+      !body.description ||
+      allImages.length === 0
+    ) {
       return res.status(400).json({
-        error: 'Missing required fields: name, brand, category_slug, description, or at least one image',
+        error:
+          'Missing required fields: name, brand, category_slug, description, or at least one image',
       });
     }
 
@@ -56,7 +65,9 @@ router.post('/', upload.array('images'), async (req, res) => {
     const discount_b2b = clampPercent(body.discount_b2b);
     const discount_b2c = clampPercent(body.discount_b2c);
     const published =
-      typeof body.published === 'string' ? body.published === 'true' : Boolean(body.published ?? true);
+      typeof body.published === 'string'
+        ? body.published === 'true'
+        : Boolean(body.published ?? true);
 
     const { rows } = await pool.query(
       `INSERT INTO "Products"
@@ -91,6 +102,7 @@ router.post('/', upload.array('images'), async (req, res) => {
 router.get('/', async (req, res) => {
   let { category = 'all', page = 1, limit = 20, brand } = req.query;
 
+  const wantAll = String(category).toLowerCase() === 'all';
   const pageNum = Math.max(1, parseInt(page, 10) || 1);
   const perPage = Math.max(1, parseInt(limit, 10) || 20);
   const offset = (pageNum - 1) * perPage;
@@ -104,15 +116,9 @@ router.get('/', async (req, res) => {
       where += ` AND brand = $${params.length}`;
     }
 
-    const catRaw = String(category || '').trim().toLowerCase();
-    const wantAll = catRaw === 'all';
-
     if (!wantAll) {
-      const leaf = catRaw.split('/').filter(Boolean).pop();
-      if (leaf) {
-        params.push(leaf);
-        where += ` AND category_slug = $${params.length}`;
-      }
+      params.push(category);
+      where += ` AND category_slug = $${params.length}`;
     }
 
     params.push(perPage, offset);
@@ -156,8 +162,7 @@ router.get('/', async (req, res) => {
       total,
       items,
     });
-  } catch (e) {
-    console.error('GET /api/products failed:', e);
+  } catch {
     return res.status(500).json({ error: 'Failed to fetch products from database' });
   }
 });
